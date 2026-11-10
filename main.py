@@ -48,9 +48,9 @@ def run_dummy_server():
     server.serve_forever()
 
 # ==========================================
-# 🗄️ DATABASE SETUP
+# 🗄️ DATABASE SETUP (লোকাল ফাইল ডাটাবেস)
 # ==========================================
-DB = "file::memory:?cache=shared" 
+DB = "bot_database.db" 
 _lock = threading.Lock()
 
 def db_init():
@@ -343,10 +343,9 @@ async def post_init(app):
     asyncio.create_task(sms_poll_loop(app.bot))
 
 # ==========================================
-# 🚀 MAIN RUNNER (Event Loop Fix)
+# 🚀 MAIN RUNNER
 # ==========================================
 def main():
-    # 🟢 Python 3.10+ (Render) এর জন্য Event Loop Fix
     try:
         asyncio.get_event_loop()
     except RuntimeError:
@@ -354,8 +353,6 @@ def main():
         asyncio.set_event_loop(new_loop)
 
     db_init()
-    
-    # Render Port Binding এর জন্য ডামি সার্ভার চালু করা হলো
     threading.Thread(target=run_dummy_server, daemon=True).start()
     
     app = (Application.builder().token(BOT_TOKEN)
