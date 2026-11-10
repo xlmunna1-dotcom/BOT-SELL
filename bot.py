@@ -9,6 +9,7 @@ import logging
 import sqlite3
 import io
 import json
+import os
 import requests as _requests
 from datetime import datetime
 
