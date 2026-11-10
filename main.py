@@ -41,13 +41,15 @@ def run_dummy_server():
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"Bot is running!")
+        def do_HEAD(self):
+            self.send_response(200)
+            self.end_headers()
     server = HTTPServer(('0.0.0.0', port), Handler)
     server.serve_forever()
 
 # ==========================================
 # 🗄️ DATABASE SETUP
 # ==========================================
-# Render এ ফাইল মুছে যাওয়া রোধ করতে ডাটাবেস মেমোরিতে রাখা হচ্ছে (file::memory:)
 DB = "file::memory:?cache=shared" 
 _lock = threading.Lock()
 
@@ -69,7 +71,6 @@ def db_init():
         );
         """)
 
-# (এখানে db_add_user, db_get_free_numbers ইত্যাদি সব ফাংশন আগের মতোই থাকবে)
 def db_add_user(tg_id, username, first_name):
     with _lock, sqlite3.connect(DB) as c:
         c.execute("""INSERT INTO users(tg_id, username, first_name, joined_at, last_active)
@@ -342,10 +343,18 @@ async def post_init(app):
     asyncio.create_task(sms_poll_loop(app.bot))
 
 # ==========================================
-# 🚀 MAIN RUNNER
+# 🚀 MAIN RUNNER (Event Loop Fix)
 # ==========================================
 def main():
+    # 🟢 Python 3.10+ (Render) এর জন্য Event Loop Fix
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        new_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(new_loop)
+
     db_init()
+    
     # Render Port Binding এর জন্য ডামি সার্ভার চালু করা হলো
     threading.Thread(target=run_dummy_server, daemon=True).start()
     
