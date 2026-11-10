@@ -31,6 +31,29 @@ SMS_USER = "munnayt556"
 SMS_PASS = "MDmunna123@"
 BOT_NAME = "SUPER WORKER"
 
+# 🌍 Country Codes (বিস্তারিত লিস্ট)
+COUNTRY_NAMES = {
+    "880": "Bangladesh 🇧🇩", "91": "India 🇮🇳", "92": "Pakistan 🇵🇰", "94": "Sri Lanka 🇱🇰", "977": "Nepal 🇳🇵",
+    "1": "USA/Canada 🇺🇸", "44": "UK 🇬🇧", "61": "Australia 🇦🇺", "64": "New Zealand 🇳🇿",
+    "258": "Mozambique 🇲🇿", "964": "Iraq 🇮🇶", "62": "Indonesia 🇮🇩", "60": "Malaysia 🇲🇾", "65": "Singapore 🇸🇬",
+    "63": "Philippines 🇵🇭", "66": "Thailand 🇹🇭", "84": "Vietnam 🇻🇳", "95": "Myanmar 🇲🇲",
+    "20": "Egypt 🇪🇬", "212": "Morocco 🇲🇦", "213": "Algeria 🇩🇿", "216": "Tunisia 🇹🇳", "218": "Libya 🇱🇾",
+    "234": "Nigeria 🇳🇬", "254": "Kenya 🇰🇪", "27": "South Africa 🇿🇦", "233": "Ghana 🇬🇭",
+    "55": "Brazil 🇧🇷", "52": "Mexico 🇲🇽", "54": "Argentina 🇦🇷", "56": "Chile 🇨🇱", "57": "Colombia 🇨🇴",
+    "7": "Russia 🇷🇺", "380": "Ukraine 🇺🇦", "48": "Poland 🇵🇱", "49": "Germany 🇩🇪", "33": "France 🇫🇷",
+    "39": "Italy 🇮🇹", "34": "Spain 🇪🇸", "31": "Netherlands 🇳🇱", "32": "Belgium 🇧🇪", "41": "Switzerland 🇨🇭",
+    "90": "Turkey 🇹🇷", "966": "Saudi Arabia 🇸🇦", "971": "UAE 🇦🇪", "974": "Qatar 🇶🇦", "965": "Kuwait 🇰🇼",
+    "968": "Oman 🇴🇲", "973": "Bahrain 🇧🇭", "962": "Jordan 🇯🇴", "961": "Lebanon 🇱🇧", "963": "Syria 🇸🇾",
+    "98": "Iran 🇮🇷", "93": "Afghanistan 🇦🇫"
+}
+
+def get_country_name(num):
+    # বড় কোড আগে চেক হবে (যেমন 880, তারপর 91)
+    for code in sorted(COUNTRY_NAMES.keys(), key=len, reverse=True):
+        if str(num).startswith(code):
+            return code, COUNTRY_NAMES[code]
+    return "other", "Others 🌐"
+
 # ==========================================
 # 🌐 FAKE WEB SERVER (Render Port Binding)
 # ==========================================
@@ -78,9 +101,27 @@ def db_add_user(tg_id, username, first_name):
                      username=excluded.username, first_name=excluded.first_name, last_active=excluded.last_active""",
                   (tg_id, username, first_name, int(time.time()), int(time.time())))
 
-def db_get_free_numbers(limit=3):
+# নতুন ফাংশন: ডাটাবেসে কোন দেশের কতগুলো নাম্বার খালি আছে তা বের করে
+def db_get_available_countries_with_counts():
     with _lock, sqlite3.connect(DB) as c:
-        rows = c.execute("SELECT number FROM numbers WHERE assigned_to IS NULL LIMIT ?", (limit,)).fetchall()
+        rows = c.execute("SELECT number FROM numbers WHERE assigned_to IS NULL").fetchall()
+    
+    counts = {}
+    for r in rows:
+        code, name = get_country_name(r[0])
+        if code not in counts:
+            counts[code] = {"name": name, "count": 0}
+        counts[code]["count"] += 1
+    return counts
+
+def db_get_free_numbers_by_country(country_code, limit=3):
+    with _lock, sqlite3.connect(DB) as c:
+        if country_code == "other":
+            known_codes = tuple(COUNTRY_NAMES.keys())
+            query = "SELECT number FROM numbers WHERE assigned_to IS NULL AND " + " AND ".join([f"number NOT LIKE '{c}%'" for c in known_codes]) + " LIMIT ?"
+            rows = c.execute(query, (limit,)).fetchall()
+        else:
+            rows = c.execute("SELECT number FROM numbers WHERE assigned_to IS NULL AND number LIKE ? LIMIT ?", (f"{country_code}%", limit)).fetchall()
         return [r[0] for r in rows]
 
 def db_assign_numbers(tg_id, numbers, service):
@@ -206,7 +247,6 @@ async def sms_poll_loop(bot):
                 owner_id = db_number_for_user(num)
                 db_log_otp(num, service, otp, msg.strip(), owner_id)
 
-                # 👤 ইউজারকে সুন্দর মেসেজ পাঠানো
                 if owner_id:
                     text = (
                         f"🔔 <b>নতুন OTP এসেছে!</b>\n\n"
@@ -217,7 +257,6 @@ async def sms_poll_loop(bot):
                         f"💬 <i>{msg.strip()[:200]}</i>\n\n"
                         f"☝️ OTP টি কপি করতে সংখ্যাটির উপরে ট্যাপ করুন।"
                     )
-                    # কপি করার জন্য Inline Button
                     kb = InlineKeyboardMarkup([
                         [InlineKeyboardButton(f"📋 COPY OTP: {otp}", callback_data=f"copy_otp:{otp}")]
                     ])
@@ -248,6 +287,16 @@ def user_main_kb(tg_id):
 def service_inline_kb():
     return InlineKeyboardMarkup([[InlineKeyboardButton("Facebook", callback_data="svc:facebook")]])
 
+def countries_inline_kb():
+    available = db_get_available_countries_with_counts()
+    rows = []
+    for code, data in available.items():
+        btn_text = f"{data['name']} ({data['count']})"
+        rows.append([InlineKeyboardButton(btn_text, callback_data=f"country:{code}")])
+    
+    rows.append([InlineKeyboardButton("🔙 BACK", callback_data="back_main")])
+    return InlineKeyboardMarkup(rows)
+
 def numbers_inline_kb(numbers):
     rows = [[InlineKeyboardButton(f"📋 Copy: {n}", callback_data=f"copy_num:{n}")] for n in numbers]
     rows.append([
@@ -263,7 +312,6 @@ def number_message_text(service, numbers):
         f"📱 <b>আপনার নাম্বারগুলো:</b>"
     ]
     for n in numbers: 
-        # 👈 মেসেজের ভেতরেও <code> ট্যাগ দেওয়া হলো
         lines.append(f"  • <code>{n}</code>")
     lines += ["", "👇 কপি করতে বাটনে ক্লিক করুন বা নাম্বারে ট্যাপ করুন।"]
     return "\n".join(lines)
@@ -281,18 +329,30 @@ async def handle_service_choice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
     service = q.data.split(":", 1)[1]
-    await q.edit_message_text(f"⏳ <b>WAIT NEW REQUEST</b>\n\n{service.title()} এর জন্য নাম্বার খোঁজা হচ্ছে...", parse_mode="HTML")
+    
+    await q.edit_message_text(
+        f"🌍 <b>{service.title()}</b> এর জন্য কোন দেশের নাম্বার চান?\n\n(বন্ধনীতে দেওয়া সংখ্যাটি হলো ঐ দেশের মোট খালি নাম্বার)",
+        parse_mode="HTML",
+        reply_markup=countries_inline_kb()
+    )
 
-    numbers = db_get_free_numbers(3)
+async def handle_country_choice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    country_code = q.data.split(":", 1)[1]
+    
+    await q.edit_message_text(f"⏳ <b>WAIT NEW REQUEST</b>\n\nনাম্বার খোঁজা হচ্ছে...", parse_mode="HTML")
+
+    numbers = db_get_free_numbers_by_country(country_code, 3)
     if not numbers:
-        await q.edit_message_text(f"❌ <b>দুঃখিত!</b> এখন নাম্বার নেই।", parse_mode="HTML")
+        await q.edit_message_text(f"❌ <b>দুঃখিত!</b> এই দেশের কোনো নাম্বার খালি নেই।", parse_mode="HTML")
         return
 
+    service = "facebook"
     db_assign_numbers(q.from_user.id, numbers, service)
-    await asyncio.sleep(1.2)
+    await asyncio.sleep(1.0)
     await q.edit_message_text(number_message_text(service, numbers), parse_mode="HTML", reply_markup=numbers_inline_kb(numbers))
 
-# 👈 কপি বাটনে ক্লিক করলে যা হবে
 async def handle_copy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     data = q.data.split(":", 1)[1]
@@ -300,7 +360,6 @@ async def handle_copy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if q.data.startswith("copy_num:"):
         await q.answer("✅ নাম্বার নিচে দেওয়া হলো, ট্যাপ করে কপি করুন!", show_alert=False)
         await q.message.reply_text(f"📋 <b>কপি করুন:</b>\n\n<code>{data}</code>", parse_mode="HTML")
-        
     elif q.data.startswith("copy_otp:"):
         await q.answer("✅ OTP নিচে দেওয়া হলো, ট্যাপ করে কপি করুন!", show_alert=False)
         await q.message.reply_text(f"🔑 <b>OTP কপি করুন:</b>\n\n<code>{data}</code>", parse_mode="HTML")
@@ -353,6 +412,11 @@ async def handle_cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def handle_back_to_user(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔙 User Menu", reply_markup=user_main_kb(update.effective_user.id))
 
+async def handle_back_main(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    await q.message.reply_text("🏠 Main Menu", reply_markup=user_main_kb(q.from_user.id))
+
 async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     tg_id = update.effective_user.id
     u = update.effective_user
@@ -390,7 +454,8 @@ def main():
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("cancel", handle_cancel))
     app.add_handler(CallbackQueryHandler(handle_service_choice, pattern=r"^svc:"))
-    # 👈 কপি করার হ্যান্ডলার
+    app.add_handler(CallbackQueryHandler(handle_country_choice, pattern=r"^country:"))
+    app.add_handler(CallbackQueryHandler(handle_back_main, pattern=r"^back_main"))
     app.add_handler(CallbackQueryHandler(handle_copy, pattern=r"^copy_")) 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
