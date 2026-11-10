@@ -48,7 +48,7 @@ def run_dummy_server():
     server.serve_forever()
 
 # ==========================================
-# 🗄️ DATABASE SETUP (লোকাল ফাইল ডাটাবেস)
+# 🗄️ DATABASE SETUP
 # ==========================================
 DB = "bot_database.db" 
 _lock = threading.Lock()
@@ -206,11 +206,22 @@ async def sms_poll_loop(bot):
                 owner_id = db_number_for_user(num)
                 db_log_otp(num, service, otp, msg.strip(), owner_id)
 
+                # 👤 ইউজারকে সুন্দর মেসেজ পাঠানো
                 if owner_id:
-                    text = (f"🔔 <b>নতুন OTP এসেছে!</b>\n\n📱 নাম্বার: <code>{num}</code>\n"
-                            f"🎯 Service: <b>{service.title()}</b>\n🔑 OTP: <code>{otp}</code>\n"
-                            f"⏰ সময়: {dt}\n\n💬 <i>{msg.strip()[:200]}</i>")
-                    try: await bot.send_message(owner_id, text, parse_mode="HTML")
+                    text = (
+                        f"🔔 <b>নতুন OTP এসেছে!</b>\n\n"
+                        f"📱 <b>নাম্বার:</b> <code>{num}</code>\n"
+                        f"🎯 <b>Service:</b> {service.title()}\n"
+                        f"🔑 <b>OTP:</b> <code>{otp}</code>\n"
+                        f"⏰ <b>সময়:</b> {dt}\n\n"
+                        f"💬 <i>{msg.strip()[:200]}</i>\n\n"
+                        f"☝️ OTP টি কপি করতে সংখ্যাটির উপরে ট্যাপ করুন।"
+                    )
+                    # কপি করার জন্য Inline Button
+                    kb = InlineKeyboardMarkup([
+                        [InlineKeyboardButton(f"📋 COPY OTP: {otp}", callback_data=f"copy_otp:{otp}")]
+                    ])
+                    try: await bot.send_message(owner_id, text, parse_mode="HTML", reply_markup=kb)
                     except: pass
 
                 if OTP_GROUP_ID:
@@ -238,7 +249,7 @@ def service_inline_kb():
     return InlineKeyboardMarkup([[InlineKeyboardButton("Facebook", callback_data="svc:facebook")]])
 
 def numbers_inline_kb(numbers):
-    rows = [[InlineKeyboardButton(f"📋 {n}", callback_data=f"copy:{n}")] for n in numbers]
+    rows = [[InlineKeyboardButton(f"📋 Copy: {n}", callback_data=f"copy_num:{n}")] for n in numbers]
     rows.append([
         InlineKeyboardButton("👥 OTP GROUP", url=OTP_GROUP_LINK),
         InlineKeyboardButton("🔄 NEXT NUMBER", callback_data="svc:facebook")
@@ -246,9 +257,15 @@ def numbers_inline_kb(numbers):
     return InlineKeyboardMarkup(rows)
 
 def number_message_text(service, numbers):
-    lines = [f"✨ <b>{BOT_NAME}</b>", "", f"🎯 Service: <b>{service.title()}</b>", "", f"📱 আপনার নাম্বারগুলো:"]
-    for n in numbers: lines.append(f"  • <code>{n}</code>")
-    lines += ["", "👇 নাম্বার ট্যাপ করলেই কপি হবে"]
+    lines = [
+        f"✨ <b>{BOT_NAME}</b>", "",
+        f"🎯 <b>Service:</b> {service.title()}", "",
+        f"📱 <b>আপনার নাম্বারগুলো:</b>"
+    ]
+    for n in numbers: 
+        # 👈 মেসেজের ভেতরেও <code> ট্যাগ দেওয়া হলো
+        lines.append(f"  • <code>{n}</code>")
+    lines += ["", "👇 কপি করতে বাটনে ক্লিক করুন বা নাম্বারে ট্যাপ করুন।"]
     return "\n".join(lines)
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -275,8 +292,18 @@ async def handle_service_choice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await asyncio.sleep(1.2)
     await q.edit_message_text(number_message_text(service, numbers), parse_mode="HTML", reply_markup=numbers_inline_kb(numbers))
 
+# 👈 কপি বাটনে ক্লিক করলে যা হবে
 async def handle_copy(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer(f"✅ কপি হয়েছে!", show_alert=False)
+    q = update.callback_query
+    data = q.data.split(":", 1)[1]
+    
+    if q.data.startswith("copy_num:"):
+        await q.answer("✅ নাম্বার নিচে দেওয়া হলো, ট্যাপ করে কপি করুন!", show_alert=False)
+        await q.message.reply_text(f"📋 <b>কপি করুন:</b>\n\n<code>{data}</code>", parse_mode="HTML")
+        
+    elif q.data.startswith("copy_otp:"):
+        await q.answer("✅ OTP নিচে দেওয়া হলো, ট্যাপ করে কপি করুন!", show_alert=False)
+        await q.message.reply_text(f"🔑 <b>OTP কপি করুন:</b>\n\n<code>{data}</code>", parse_mode="HTML")
 
 async def handle_admin_panel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS: return
@@ -363,7 +390,8 @@ def main():
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("cancel", handle_cancel))
     app.add_handler(CallbackQueryHandler(handle_service_choice, pattern=r"^svc:"))
-    app.add_handler(CallbackQueryHandler(handle_copy, pattern=r"^copy:"))
+    # 👈 কপি করার হ্যান্ডলার
+    app.add_handler(CallbackQueryHandler(handle_copy, pattern=r"^copy_")) 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     log.info("✅ Bot চালু হচ্ছে...")
