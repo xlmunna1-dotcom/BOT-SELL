@@ -5,7 +5,9 @@ import sqlite3
 import threading
 import re
 import requests
+import os
 from datetime import datetime
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from telegram import (
     Update, ReplyKeyboardMarkup, KeyboardButton,
@@ -30,9 +32,23 @@ SMS_PASS = "MDmunna123@"
 BOT_NAME = "SUPER WORKER"
 
 # ==========================================
+# 🌐 FAKE WEB SERVER (Render Port Binding)
+# ==========================================
+def run_dummy_server():
+    port = int(os.environ.get("PORT", 8080))
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Bot is running!")
+    server = HTTPServer(('0.0.0.0', port), Handler)
+    server.serve_forever()
+
+# ==========================================
 # 🗄️ DATABASE SETUP
 # ==========================================
-DB = "bot.db"
+# Render এ ফাইল মুছে যাওয়া রোধ করতে ডাটাবেস মেমোরিতে রাখা হচ্ছে (file::memory:)
+DB = "file::memory:?cache=shared" 
 _lock = threading.Lock()
 
 def db_init():
@@ -53,6 +69,7 @@ def db_init():
         );
         """)
 
+# (এখানে db_add_user, db_get_free_numbers ইত্যাদি সব ফাংশন আগের মতোই থাকবে)
 def db_add_user(tg_id, username, first_name):
     with _lock, sqlite3.connect(DB) as c:
         c.execute("""INSERT INTO users(tg_id, username, first_name, joined_at, last_active)
@@ -212,7 +229,6 @@ async def sms_poll_loop(bot):
 # 🤖 TELEGRAM BOT HANDLERS
 # ==========================================
 def user_main_kb(tg_id):
-    # 🟢 এখন থেকে Reply Keyboard এ শুধু GET NUMBER থাকবে (এবং এডমিন হলে ADMIN PANEL)
     buttons = [[KeyboardButton("GET NUMBER")]]
     if tg_id in ADMIN_IDS: buttons.append([KeyboardButton("ADMIN PANEL")])
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
@@ -221,7 +237,6 @@ def service_inline_kb():
     return InlineKeyboardMarkup([[InlineKeyboardButton("Facebook", callback_data="svc:facebook")]])
 
 def numbers_inline_kb(numbers):
-    # 🟢 ৩টা নাম্বারের নিচে OTP GROUP এবং NEXT NUMBER বাটন
     rows = [[InlineKeyboardButton(f"📋 {n}", callback_data=f"copy:{n}")] for n in numbers]
     rows.append([
         InlineKeyboardButton("👥 OTP GROUP", url=OTP_GROUP_LINK),
@@ -331,6 +346,9 @@ async def post_init(app):
 # ==========================================
 def main():
     db_init()
+    # Render Port Binding এর জন্য ডামি সার্ভার চালু করা হলো
+    threading.Thread(target=run_dummy_server, daemon=True).start()
+    
     app = (Application.builder().token(BOT_TOKEN)
            .get_updates_request(HTTPXRequest(connection_pool_size=1, read_timeout=30.0, connect_timeout=15.0))
            .request(HTTPXRequest(connection_pool_size=8, read_timeout=15.0, connect_timeout=10.0))
